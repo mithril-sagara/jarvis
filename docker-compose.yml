@@ -1,0 +1,34 @@
+services:
+  # AIの脳 (Ollama)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: jarvis-brain
+    volumes:
+      - ./ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: always
+
+  # 音声処理ハブ (WakeWord, STT, TTSをまとめたコンテナ例)
+  # ※実際にはWyomingプロトコルなどを使うと軽量です
+  voice-engine:
+    image: rhasspy/wyoming-whisper:latest # Faster-Whisper搭載
+    container_name: jarvis-ear
+    command: --model base --language ja
+    volumes:
+      - ./whisper_data:/data
+    ports:
+      - "10300:10300"
+
+  # メインコントローラー (自作Pythonスクリプト)
+  jarvis-controller:
+    build: ./controller
+    container_name: jarvis-main
+    devices:
+      - "/dev/snd:/dev/snd" # マイク・スピーカー権限
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - OLLAMA_HOST=http://jarvis-brain:11434
+    depends_on:
+      - ollama
+      - voice-engine

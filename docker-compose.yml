@@ -7,6 +7,9 @@ services:
       - ./model_data:/root/.ollama
     ports:
       - "11434:11434"
+# ここに自動プル命令を追加
+    entrypoint: /bin/sh
+    command: -c "ollama serve & sleep 10 && ollama pull llama3.2:3b && wait"
     restart: always
 
   # 耳: Faster-Whisper (日本語・爆速設定)

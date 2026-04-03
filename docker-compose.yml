@@ -26,23 +26,17 @@ services:
       context: .
       dockerfile_inline: |
         FROM python:3.11-slim
-        # システムパッケージのインストール（証明書更新とビルドツールを含む）
+        # ビルドに必要な最小限のパッケージのみ（wgetは不要）
         RUN apt-get update && apt-get install -y \
             alsa-utils x11-xserver-utils xscreensaver portaudio19-dev \
-            gcc python3-dev libatomic1 wget ca-certificates && \
-            update-ca-certificates && \
+            gcc python3-dev libatomic1 ca-certificates && \
             rm -rf /var/lib/apt/lists/*
         
         WORKDIR /app
         
-        # Pythonライブラリ（メモリ負荷軽減のため分割インストール）
+        # ライブラリのインストール
         RUN pip install --no-cache-dir --upgrade pip
-        RUN pip install --no-cache-dir requests influxdb-client ollama
-        RUN pip install --no-cache-dir openwakeword pyaudio numpy
-        
-        # ジャービスのモデルを公式から直接取得（HTTPSエラー対策済み）
-        RUN mkdir -p /app/models && \
-            wget --no-check-certificate -L -O /app/models/jarvis.tflite "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.tflite"
+        RUN pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
         
         COPY . .
         CMD ["python", "main.py"]
@@ -55,6 +49,7 @@ services:
       - "/dev/snd:/dev/snd"
     volumes:
       - .:/app
+      - ./models:/app/models  # ★ホストで落としたモデルをここに流し込む
       - /tmp/.X11-unix:/tmp/.X11-unix
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}
@@ -67,4 +62,5 @@ services:
       - SPEAKER_ID=13
       - OLLAMA_MODEL=llama3.2:1b
       - DISPLAY=:0
+      - JARVIS_MODEL_PATH=/app/models/jarvis.tflite
     restart: unless-stopped

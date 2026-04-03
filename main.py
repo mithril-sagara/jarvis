@@ -99,27 +99,43 @@ def speak(text):
 
 # --- 8. メインループ (判定部分のみ強化) ---
 def jarvis_cycle():
-    print("Jarvis Online. Waiting for 'Jarvis'...")
+    # 表示を Jarvis に合わせて変更
+    print("Jarvis Online. Waiting for 'Hey Jarvis'...") 
+    
     while True:
         data = mic_stream.read(CHUNK, exception_on_overflow=False)
         audio_frame = np.frombuffer(data, dtype=np.int16)
         
+        # ウェイクワードの推論
         prediction = oww_model.predict(audio_frame)
-        # 判定をより確実に
-        if any(prediction[mdl] > 0.5 for mdl in prediction):
+        
+        # ★ 修正箇所：
+        # 公式モデルは内部で 'hey_jarvis' という名前で保持されています。
+        # 単純に「0.5を超えたモデルが一つでもあるか」をチェックする書き方にします。
+        detected = False
+        for mdl in prediction:
+            if prediction[mdl] > 0.5: # 感度設定（0.5）
+                detected = True
+                break
+
+        if detected:
             print("Wake Word Detected!")
             control_screen("wake")
             
+            # 1. あなたの声を聴く (STT)
             user_command = listen_and_stt()
             print(f"You said: {user_command}")
             
             if user_command:
+                # 2. AIが考える (LLM)
                 answer = ask_jarvis(user_command)
                 print(f"Jarvis: {answer}")
+                
+                # 3. AIが喋る (TTS)
                 speak(answer)
             
             time.sleep(2)
             print("Waiting for Wake Word...")
-
+          
 if __name__ == "__main__":
     jarvis_cycle()

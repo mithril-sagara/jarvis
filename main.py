@@ -1,40 +1,41 @@
-import time
+import os
+import requests
 import subprocess
-from ollama import Client
+import time
+from influxdb_client import InfluxDBClient
 
-# 設定
-WAKE_WORD = "jarvis"
-client = Client(host='http://jarvis-brain:11434')
+# 環境変数の読み込み
+MODEL = os.getenv("OLLAMA_MODEL")
+STT_URL = os.getenv("STT_URL")
+TTS_URL = os.getenv("TTS_URL")
+SPEAKER_ID = os.getenv("SPEAKER_ID")
 
-def start_screensaver():
-    # スクリーンセーバーを起動するコマンド（ホスト側と通信が必要）
-    subprocess.run(["xscreensaver-command", "-activate"])
+# スクリーンセーバー制御
+def control_screen(action):
+    if action == "wake":
+        subprocess.run(["xscreensaver-command", "-deactivate"], env={"DISPLAY": ":0"})
+    else:
+        subprocess.run(["xscreensaver-command", "-activate"], env={"DISPLAY": ":0"})
 
-def stop_screensaver():
-    # スクリーンセーバーを停止（復帰）
-    subprocess.run(["xscreensaver-command", "-deactivate"])
+# VOICEVOXで喋る
+def speak(text):
+    query = requests.post(f"{TTS_URL}/audio_query?text={text}&speaker={SPEAKER_ID}")
+    audio = requests.post(f"{TTS_URL}/synthesis?speaker={SPEAKER_ID}", data=query.content)
+    with open("reply.wav", "wb") as f:
+        f.write(audio.content)
+    subprocess.run(["aplay", "reply.wav"])
 
-def main_loop():
-    while True:
-        print("待機中: ジャービスを待っています...")
-        # 1. WakeWord検知 (openWakeWordのストリームを監視)
-        if wait_for_wake_word(WAKE_WORD):
-            stop_screensaver() # 画面復帰
-            play_sound("detect.wav") # 起動音「ピッ」
-            
-            # 2. 音声録音 & Faster-Whisperでテキスト化
-            user_text = listen_and_stt()
-            
-            # 3. Llama 3.1 で思考（必要ならInfluxDBをクエリ）
-            # ここで Function Calling を実装
-            response_text = think_with_llama(user_text)
-            
-            # 4. Piper で発話
-            speak_with_piper(response_text)
-            
-            # 5. 完了後、少し待ってセーバーに戻る
-            time.sleep(10)
-            start_screensaver()
+# メイン処理
+def jarvis_cycle():
+    # 本来はここに openWakeWord の検知を入れる
+    print("Waiting for 'Jarvis'...")
+    
+    # 擬似的に検知した後の流れ
+    control_screen("wake")
+    speak("はい、Sir。何を確認しますか？")
+    
+    # 録音 -> STT -> Ollama -> InfluxDB -> TTS の流れをここに実装
+    # Llama 3.2 3B は Fluxクエリの生成も高速です
 
 if __name__ == "__main__":
-    main_loop()
+    jarvis_cycle()

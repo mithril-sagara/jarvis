@@ -1,5 +1,5 @@
 services:
-  # AIの脳 (Ollama)
+  # --- 1. 脳 (LLM): Ollama ---
   ollama:
     image: ollama/ollama:latest
     container_name: jarvis-brain
@@ -9,26 +9,47 @@ services:
       - "11434:11434"
     restart: always
 
-  # 音声処理ハブ (WakeWord, STT, TTSをまとめたコンテナ例)
-  # ※実際にはWyomingプロトコルなどを使うと軽量です
-  voice-engine:
-    image: rhasspy/wyoming-whisper:latest # Faster-Whisper搭載
-    container_name: jarvis-ear
-    command: --model base --language ja
-    volumes:
-      - ./whisper_data:/data
+  # --- 2. 耳 (STT): Faster-Whisper ---
+  stt-whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: jarvis-stt
+    environment:
+      - WHISPER_MODEL=base
+      - WHISPER_LANGUAGE=ja
     ports:
       - "10300:10300"
+    restart: unless-stopped
 
-  # メインコントローラー (自作Pythonスクリプト)
-  jarvis-controller:
-    build: ./controller
-    container_name: jarvis-main
-    devices:
-      - "/dev/snd:/dev/snd" # マイク・スピーカー権限
-    environment:
-      - INFLUXDB_URL=http://influxdb:8086
-      - OLLAMA_HOST=http://jarvis-brain:11434
+  # --- 3. 口 (TTS): VOICEVOX ---
+  tts-voicevox:
+    image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+    container_name: jarvis-tts
+    ports:
+      - "50021:50021"
+    restart: unless-stopped
+
+  # --- 4. 司令塔 (Controller): Jarvis Core ---
+  jarvis-core:
+    build: ./jarvis_core
+    container_name: jarvis-core
     depends_on:
       - ollama
-      - voice-engine
+      - stt-whisper
+      - tts-voicevox
+    devices:
+      - "/dev/snd:/dev/snd"
+    volumes:
+      - ./jarvis_core:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    # .env から環境変数を取り込む
+    environment:
+      - INFLUXDB_URL=${INFLUXDB_URL}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - OLLAMA_HOST=ollama:11434
+      - STT_URL=http://stt-whisper:10300/transcribe
+      - TTS_URL=http://tts-voicevox:50021
+      - SPEAKER_ID=${JARVIS_VOICE_ID}
+      - DISPLAY=${DISPLAY}
+    restart: unless-stopped

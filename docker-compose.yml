@@ -26,13 +26,28 @@ services:
       context: .
       dockerfile_inline: |
         FROM python:3.11-slim
-        # 必要なシステムパッケージを全投入
-        RUN apt-get update && apt-get install -y alsa-utils x11-xserver-utils xscreensaver portaudio19-dev libatomic1 wget && rm -rf /var/lib/apt/lists/*
-        # ライブラリを事前インストール
-        RUN pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
+        # 1. システムパッケージを全投入（pyaudioビルド用の gcc と python3-dev を追加）
+        RUN apt-get update && apt-get install -y \
+            alsa-utils \
+            x11-xserver-utils \
+            xscreensaver \
+            portaudio19-dev \
+            gcc \
+            python3-dev \
+            libatomic1 \
+            wget \
+            && rm -rf /var/lib/apt/lists/*
+        
         WORKDIR /app
-        # ジャービスのモデルを自動取得（アレクサから卒業）
-        RUN mkdir -p /app/models && wget -O /app/models/jarvis.tflite https://github.com/fkie-it/openwakeword-models/raw/main/models/jarvis.tflite
+        
+        # 2. ライブラリをインストール（pip自体も最新に）
+        RUN pip install --no-cache-dir --upgrade pip && \
+            pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
+        
+        # 3. ジャービスのモデルを自動取得
+        RUN mkdir -p /app/models && \
+            wget -O /app/models/jarvis.tflite https://github.com/fkie-it/openwakeword-models/raw/main/models/jarvis.tflite
+        
         COPY . .
         CMD ["python", "main.py"]
     container_name: jarvis-core

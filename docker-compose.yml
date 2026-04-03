@@ -47,7 +47,7 @@ services:
         
         # 3. ジャービスのモデルを自動取得
         RUN mkdir -p /app/models && \
-            wget -O /app/models/jarvis.tflite https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.tflite
+            wget -L -O /app/models/jarvis.tflite "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.tflite"
         
         COPY . .
         CMD ["python", "main.py"]

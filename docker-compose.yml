@@ -1,32 +1,43 @@
 services:
-  # 脳: Ollama
+  # --- 1. 脳 (LLM): Ollama ---
   ollama:
     image: ollama/ollama:latest
     container_name: jarvis-brain
     volumes:
       - ./ollama_data:/root/.ollama
+    # 起動時に1Bモデル（爆速版）を自動プル
     entrypoint: /bin/sh
-    command: -c "ollama serve & sleep 10 && ollama pull llama3.2:3b && wait"
+    command: -c "ollama serve & sleep 5 && ollama pull llama3.2:1b && wait"
     restart: always
 
-  # 耳: Faster-Whisper
+  # --- 2. 耳 (STT): Faster-Whisper ---
   stt:
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: jarvis-stt
     environment:
-      - WHISPER_MODEL=small
+      - WHISPER_MODEL=tiny
       - WHISPER_LANGUAGE=ja
     restart: unless-stopped
 
-  # 口: VOICEVOX
+  # --- 3. 口 (TTS): VOICEVOX ---
   tts:
     image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
     container_name: jarvis-tts
     restart: unless-stopped
 
-  # 司令塔: Jarvis Core (ビルド不要構成)
+  # --- 4. 司令塔 (Core): 全自動ビルド構成 ---
   jarvis-core:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        RUN apt-get update && apt-get install -y alsa-utils x11-xserver-utils xscreensaver portaudio19-dev libatomic1 wget && rm -rf /var/lib/apt/lists/*
+        RUN pip install requests influxdb-client ollama openwakeword pyaudio numpy
+        WORKDIR /app
+        # ジャービスのモデルファイルを自動ダウンロード
+        RUN mkdir -p /app/models && wget -O /app/models/jarvis.tflite https://github.com/fkie-it/openwakeword-models/raw/main/models/jarvis.tflite
+        COPY main.py .
+        CMD ["python", "main.py"]
     container_name: jarvis-core
     depends_on:
       - ollama
@@ -35,22 +46,17 @@ services:
     devices:
       - "/dev/snd:/dev/snd"
     volumes:
-      - .:/app                 # カレントディレクトリを丸ごとマウント
+      - .:/app
       - /tmp/.X11-unix:/tmp/.X11-unix
-    working_dir: /app
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - OLLAMA_HOST=ollama:11434
       - STT_URL=http://stt:10300/transcribe
       - TTS_URL=http://tts:50021
-      - SPEAKER_ID=${JARVIS_VOICE_ID}
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
-      - DISPLAY=${DISPLAY}
-    # 起動時に必要なライブラリをインストールして実行
-    command: >
-      sh -c "apt-get update && 
-             apt-get install -y alsa-utils x11-xserver-utils xscreensaver portaudio19-dev python3-pyaudio libatomic1 && 
-             pip install requests influxdb-client ollama openwakeword pyaudio && 
-             python main.py"
+      - SPEAKER_ID=13
+      - OLLAMA_MODEL=llama3.2:1b
+      - DISPLAY=:0
     restart: unless-stopped

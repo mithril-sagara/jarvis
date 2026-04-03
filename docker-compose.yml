@@ -1,16 +1,13 @@
 services:
-  # --- 1. 脳 (LLM): Ollama ---
   ollama:
     image: ollama/ollama:latest
     container_name: jarvis-brain
     volumes:
       - ./ollama_data:/root/.ollama
-    # 起動時に1Bモデル（爆速版）を自動プル
     entrypoint: /bin/sh
     command: -c "ollama serve & sleep 5 && ollama pull llama3.2:1b && wait"
     restart: always
 
-  # --- 2. 耳 (STT): Faster-Whisper ---
   stt:
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: jarvis-stt
@@ -19,24 +16,24 @@ services:
       - WHISPER_LANGUAGE=ja
     restart: unless-stopped
 
-  # --- 3. 口 (TTS): VOICEVOX ---
   tts:
     image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
     container_name: jarvis-tts
     restart: unless-stopped
 
-  # --- 4. 司令塔 (Core): 全自動ビルド構成 ---
   jarvis-core:
     build:
       context: .
       dockerfile_inline: |
         FROM python:3.11-slim
+        # 必要なシステムパッケージを全投入
         RUN apt-get update && apt-get install -y alsa-utils x11-xserver-utils xscreensaver portaudio19-dev libatomic1 wget && rm -rf /var/lib/apt/lists/*
-        RUN pip install requests influxdb-client ollama openwakeword pyaudio numpy
+        # ライブラリを事前インストール
+        RUN pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
         WORKDIR /app
-        # ジャービスのモデルファイルを自動ダウンロード
+        # ジャービスのモデルを自動取得（アレクサから卒業）
         RUN mkdir -p /app/models && wget -O /app/models/jarvis.tflite https://github.com/fkie-it/openwakeword-models/raw/main/models/jarvis.tflite
-        COPY main.py .
+        COPY . .
         CMD ["python", "main.py"]
     container_name: jarvis-core
     depends_on:

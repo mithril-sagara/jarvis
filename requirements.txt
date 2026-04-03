@@ -1,0 +1,6 @@
+requests
+influxdb-client
+ollama
+openwakeword
+pyaudio
+numpy

@@ -26,28 +26,23 @@ services:
       context: .
       dockerfile_inline: |
         FROM python:3.11-slim
-        # 1. システムパッケージを全投入（pyaudioビルド用の gcc と python3-dev を追加）
+        # システムパッケージのインストール（証明書更新とビルドツールを含む）
         RUN apt-get update && apt-get install -y \
-            alsa-utils \
-            x11-xserver-utils \
-            xscreensaver \
-            portaudio19-dev \
-            gcc \
-            python3-dev \
-            libatomic1 \
-            wget \
-            && rm -rf /var/lib/apt/lists/*
+            alsa-utils x11-xserver-utils xscreensaver portaudio19-dev \
+            gcc python3-dev libatomic1 wget ca-certificates && \
+            update-ca-certificates && \
+            rm -rf /var/lib/apt/lists/*
         
         WORKDIR /app
         
-        # 2. ライブラリをインストール（pip自体も最新に）
+        # Pythonライブラリ（メモリ負荷軽減のため分割インストール）
         RUN pip install --no-cache-dir --upgrade pip
         RUN pip install --no-cache-dir requests influxdb-client ollama
         RUN pip install --no-cache-dir openwakeword pyaudio numpy
         
-        # 3. ジャービスのモデルを自動取得
+        # ジャービスのモデルを公式から直接取得（HTTPSエラー対策済み）
         RUN mkdir -p /app/models && \
-            wget -L -O /app/models/jarvis.tflite "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.tflite"
+            wget --no-check-certificate -L -O /app/models/jarvis.tflite "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/hey_jarvis_v0.1.tflite"
         
         COPY . .
         CMD ["python", "main.py"]

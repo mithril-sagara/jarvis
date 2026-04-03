@@ -50,7 +50,7 @@ services:
     # 起動時に必要なライブラリをインストールして実行
     command: >
       sh -c "apt-get update && 
-             apt-get install -y alsa-utils x11-xserver-utils xscreensaver && 
-             pip install requests influxdb-client ollama && 
+             apt-get install -y alsa-utils x11-xserver-utils xscreensaver portaudio19-dev python3-pyaudio libatomic1 && 
+             pip install requests influxdb-client ollama openwakeword pyaudio && 
              python main.py"
     restart: unless-stopped

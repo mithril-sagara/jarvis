@@ -1,58 +1,55 @@
 services:
-  # 脳: Ollama (Llama 3.2 3Bをロード)
+  # 脳: Ollama
   ollama:
     image: ollama/ollama:latest
     container_name: jarvis-brain
     volumes:
-      - ./model_data:/root/.ollama
-    ports:
-      - "11434:11434"
-# ここに自動プル命令を追加
+      - ./ollama_data:/root/.ollama
     entrypoint: /bin/sh
     command: -c "ollama serve & sleep 10 && ollama pull llama3.2:3b && wait"
     restart: always
 
-  # 耳: Faster-Whisper (日本語・爆速設定)
+  # 耳: Faster-Whisper
   stt:
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: jarvis-stt
     environment:
-      - WHISPER_MODEL=small # baseより精度が高くPi 5で動く限界の速さ
+      - WHISPER_MODEL=small
       - WHISPER_LANGUAGE=ja
-    ports:
-      - "10300:10300"
     restart: unless-stopped
 
-  # 口: VOICEVOX (CPU版)
+  # 口: VOICEVOX
   tts:
     image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
     container_name: jarvis-tts
-    ports:
-      - "50021:50021"
     restart: unless-stopped
 
-  # 司令塔: Jarvis Core
+  # 司令塔: Jarvis Core (ビルド不要構成)
   jarvis-core:
-    build: ./jarvis_core
+    image: python:3.11-slim
     container_name: jarvis-core
     depends_on:
       - ollama
       - stt
       - tts
     devices:
-      - "/dev/snd:/dev/snd" # マイク・スピーカー
+      - "/dev/snd:/dev/snd"
     volumes:
-      - ./jarvis_core:/app
+      - .:/app                 # カレントディレクトリを丸ごとマウント
       - /tmp/.X11-unix:/tmp/.X11-unix
+    working_dir: /app
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
-      - INFLUXDB_ORG=${INFLUXDB_ORG}
-      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - OLLAMA_HOST=ollama:11434
       - STT_URL=http://stt:10300/transcribe
       - TTS_URL=http://tts:50021
       - SPEAKER_ID=${JARVIS_VOICE_ID}
       - OLLAMA_MODEL=${OLLAMA_MODEL}
       - DISPLAY=${DISPLAY}
+    # 起動時に必要なライブラリをインストールして実行
+    command: >
+      sh -c "apt-get update && apt-get install -y alsa-utils x11-xserver-utils && 
+             pip install requests influxdb-client ollama && 
+             python main.py"
     restart: unless-stopped

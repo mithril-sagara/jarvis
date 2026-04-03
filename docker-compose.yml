@@ -1,55 +1,55 @@
 services:
-  # --- 1. 脳 (LLM): Ollama ---
+  # 脳: Ollama (Llama 3.2 3Bをロード)
   ollama:
     image: ollama/ollama:latest
     container_name: jarvis-brain
     volumes:
-      - ./ollama_data:/root/.ollama
+      - ./model_data:/root/.ollama
     ports:
       - "11434:11434"
     restart: always
 
-  # --- 2. 耳 (STT): Faster-Whisper ---
-  stt-whisper:
+  # 耳: Faster-Whisper (日本語・爆速設定)
+  stt:
     image: fedirz/faster-whisper-server:latest-cpu
     container_name: jarvis-stt
     environment:
-      - WHISPER_MODEL=base
+      - WHISPER_MODEL=small # baseより精度が高くPi 5で動く限界の速さ
       - WHISPER_LANGUAGE=ja
     ports:
       - "10300:10300"
     restart: unless-stopped
 
-  # --- 3. 口 (TTS): VOICEVOX ---
-  tts-voicevox:
+  # 口: VOICEVOX (CPU版)
+  tts:
     image: voicevox/voicevox_engine:cpu-ubuntu20.04-latest
     container_name: jarvis-tts
     ports:
       - "50021:50021"
     restart: unless-stopped
 
-  # --- 4. 司令塔 (Controller): Jarvis Core ---
+  # 司令塔: Jarvis Core
   jarvis-core:
     build: ./jarvis_core
     container_name: jarvis-core
     depends_on:
       - ollama
-      - stt-whisper
-      - tts-voicevox
+      - stt
+      - tts
     devices:
-      - "/dev/snd:/dev/snd"
+      - "/dev/snd:/dev/snd" # マイク・スピーカー
     volumes:
       - ./jarvis_core:/app
       - /tmp/.X11-unix:/tmp/.X11-unix
-    # .env から環境変数を取り込む
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - OLLAMA_HOST=ollama:11434
-      - STT_URL=http://stt-whisper:10300/transcribe
-      - TTS_URL=http://tts-voicevox:50021
+      - STT_URL=http://stt:10300/transcribe
+      - TTS_URL=http://tts:50021
       - SPEAKER_ID=${JARVIS_VOICE_ID}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
       - DISPLAY=${DISPLAY}
     restart: unless-stopped

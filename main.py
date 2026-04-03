@@ -2,6 +2,10 @@ import os
 import requests
 import subprocess
 import time
+import pyaudio
+import numpy as np
+import openwakeword
+from openwakeword.model import Model
 from influxdb_client import InfluxDBClient
 
 # --- 1. 環境変数の読み込み ---
@@ -11,13 +15,27 @@ ORG = os.getenv("INFLUXDB_ORG")
 BUCKET = os.getenv("INFLUXDB_BUCKET", "hems")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "ollama:11434")
 MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
-TTS_URL = os.getenv("TTS_URL", "http://tts:50021")
-SPEAKER_ID = os.getenv("SPEAKER_ID", "13") # 青山龍星
+STT_URL = os.getenv("STT_URL")        # http://stt:10300/transcribe
+TTS_URL = os.getenv("TTS_URL")        # http://tts:50021
+SPEAKER_ID = os.getenv("SPEAKER_ID", "13") 
 
-# InfluxDBクライアントの初期化
+# --- 2. 各種設定と初期化 ---
+CHANNELS = 1
+RATE = 16000
+CHUNK = 1280 
+
+# InfluxDBクライアント
 client = InfluxDBClient(url=URL, token=TOKEN, org=ORG)
 
-# --- 2. 画面制御 ---
+# openWakeWordモデル (alexaをジャービスの代わりに一旦使用)
+oww_model = Model(wakeword_models=["alexa"], inference_framework="tflite")
+
+# マイクストリーム開始
+audio_py = pyaudio.PyAudio()
+mic_stream = audio_py.open(format=pyaudio.paInt16, channels=CHANNELS, rate=RATE,
+                           input=True, frames_per_buffer=CHUNK)
+
+# --- 3. 画面制御 ---
 def control_screen(action):
     try:
         if action == "wake":
@@ -25,10 +43,9 @@ def control_screen(action):
             subprocess.run(["xset", "dpms", "force", "on"], env={"DISPLAY": ":0"}, check=False)
         else:
             subprocess.run(["xscreensaver-command", "-activate"], env={"DISPLAY": ":0"}, check=False)
-    except Exception as e:
-        print(f"Screen control error: {e}")
+    except: pass
 
-# --- 3. InfluxDBから最新の発電量を取得 ---
+# --- 4. InfluxDBから最新の発電量を取得 ---
 def get_current_solar():
     try:
         query = f'from(bucket: "{BUCKET}") |> range(start: -1m) |> filter(fn: (r) => r["_field"] == "solar_w") |> last()'
@@ -37,72 +54,80 @@ def get_current_solar():
             for record in table.records:
                 return record.get_value()
         return 0
-    except Exception as e:
-        print(f"InfluxDB error: {e}")
-        return None
+    except: return 0
 
-# --- 4. Llama 3.2 に応答文を作らせる ---
+# --- 5. 耳 (STT): 呼びかけ後の音声をテキスト化 ---
+def listen_and_stt():
+    # 3秒間録音してFaster-Whisperに送る
+    print("Listening to your command...")
+    frames = []
+    for _ in range(0, int(RATE / CHUNK * 3)):
+        data = mic_stream.read(CHUNK, exception_on_overflow=False)
+        frames.append(data)
+    
+    audio_data = b''.join(frames)
+    try:
+        # Faster-Whisper APIに送信
+        files = {'audio_file': ('speech.wav', audio_data, 'audio/wav')}
+        res = requests.post(STT_URL, files=files)
+        return res.json().get("text", "")
+    except: return ""
+
+# --- 6. 脳 (LLM): Llama 3.2 への問い合わせ ---
 def ask_jarvis(user_text):
     solar_val = get_current_solar()
-    solar_str = f"{solar_val}W" if solar_val is not None else "不明"
-    
-    # ジャービスのキャラ設定プロンプト
     system_prompt = (
-        "あなたはアイアンマンのトニー・スタークに仕えるAI、ジャービスです。 "
-        "冷静沈着で、丁寧な執事口調で話してください。 "
-        f"現在の太陽光発電量は {solar_str} です。この数値を元に回答してください。 "
-        "回答は30文字以内で、簡潔に数値を含めてください。"
+        "あなたはジャービスです。冷静で丁寧な執事口調で話してください。 "
+        f"現在の太陽光発電量は {solar_val}W です。回答は30文字以内で簡潔に数値を含めてください。"
     )
-
     payload = {
         "model": MODEL,
         "prompt": f"{system_prompt}\nユーザー: {user_text}\nジャービス:",
         "stream": False
     }
-    
     try:
-        response = requests.post(f"http://{OLLAMA_HOST}/api/generate", json=payload)
-        return response.json().get("response", "エラーが発生しました、Sir。")
-    except Exception as e:
-        return f"AI通信エラーです: {e}"
+        res = requests.post(f"http://{OLLAMA_HOST}/api/generate", json=payload)
+        return res.json().get("response", "Sir, 申し訳ありません。エラーです。")
+    except: return "通信に失敗しました。"
 
-# --- 5. VOICEVOX で発話 ---
+# --- 7. 口 (TTS): VOICEVOX で発話 ---
 def speak(text):
     try:
-        # 音声合成クエリ作成
-        query_res = requests.post(f"{TTS_URL}/audio_query?text={text}&speaker={SPEAKER_ID}")
-        # 音声データ生成
-        audio_res = requests.post(f"{TTS_URL}/synthesis?speaker={SPEAKER_ID}", data=query_res.content)
-        
+        q_res = requests.post(f"{TTS_URL}/audio_query?text={text}&speaker={SPEAKER_ID}")
+        a_res = requests.post(f"{TTS_URL}/synthesis?speaker={SPEAKER_ID}", data=q_res.content)
         with open("reply.wav", "wb") as f:
-            f.write(audio_res.content)
-        
-        # aplay で再生
+            f.write(a_res.content)
         subprocess.run(["aplay", "reply.wav"], check=False)
-    except Exception as e:
-        print(f"TTS error: {e}")
+    except: print("TTS Error")
 
-# --- 6. メインサイクル ---
+# --- 8. メインループ ---
 def jarvis_cycle():
-    print("Jarvis System Online. Ready for command.")
-    
+    print("Jarvis Online. Waiting for Wake Word...")
     while True:
-        # シミュレーション：Enterキーで「ジャービス！」と呼びかけたとみなす
-        input("\n[Enter]キーを押して呼びかけ（ジャービス！）をシミュレート...")
+        # マイク入力を監視
+        data = mic_stream.read(CHUNK, exception_on_overflow=False)
+        audio_frame = np.frombuffer(data, dtype=np.int16)
         
-        # 1. 画面を復帰
-        control_screen("wake")
-        
-        # 2. 思考（InfluxDB値取得含む）
-        print("Thinking...")
-        answer = ask_jarvis("現在の発電状況を教えてください。")
-        
-        # 3. 発話
-        print(f"Jarvis: {answer}")
-        speak(answer)
-        
-        # 4. 少し待ってから終了（実際はここからまたループに戻る）
-        print("Waiting for next command...")
+        # ウェイクワード判定
+        prediction = oww_model.predict(audio_frame)
+        if any(prediction[mdl] > 0.5 for mdl in prediction):
+            print("Wake Word Detected!")
+            control_screen("wake")
+            
+            # 1. あなたの声を聴く (STT)
+            user_command = listen_and_stt()
+            print(f"You said: {user_command}")
+            
+            if user_command:
+                # 2. AIが考える (LLM)
+                answer = ask_jarvis(user_command)
+                print(f"Jarvis: {answer}")
+                
+                # 3. AIが喋る (TTS)
+                speak(answer)
+            
+            time.sleep(2)
+            print("Waiting for Wake Word...")
 
 if __name__ == "__main__":
     jarvis_cycle()

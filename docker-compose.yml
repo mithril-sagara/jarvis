@@ -41,8 +41,9 @@ services:
         WORKDIR /app
         
         # 2. ライブラリをインストール（pip自体も最新に）
-        RUN pip install --no-cache-dir --upgrade pip && \
-            pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
+        RUN pip install --no-cache-dir --upgrade pip
+        RUN pip install --no-cache-dir requests influxdb-client ollama
+        RUN pip install --no-cache-dir openwakeword pyaudio numpy
         
         # 3. ジャービスのモデルを自動取得
         RUN mkdir -p /app/models && \

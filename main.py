@@ -3,6 +3,8 @@ import requests
 import subprocess
 import time
 from influxdb_client import InfluxDBClient
+import os
+import subprocess
 
 # 環境変数の読み込み
 MODEL = os.getenv("OLLAMA_MODEL")
@@ -12,10 +14,16 @@ SPEAKER_ID = os.getenv("SPEAKER_ID")
 
 # スクリーンセーバー制御
 def control_screen(action):
-    if action == "wake":
-        subprocess.run(["xscreensaver-command", "-deactivate"], env={"DISPLAY": ":0"})
-    else:
-        subprocess.run(["xscreensaver-command", "-activate"], env={"DISPLAY": ":0"})
+    try:
+        if action == "wake":
+            # xscreensaverを解除
+            subprocess.run(["xscreensaver-command", "-deactivate"], env={"DISPLAY": ":0"}, check=False)
+            # 画面を強制ON
+            subprocess.run(["xset", "dpms", "force", "on"], env={"DISPLAY": ":0"}, check=False)
+        else:
+            subprocess.run(["xscreensaver-command", "-activate"], env={"DISPLAY": ":0"}, check=False)
+    except Exception as e:
+        print(f"Screen control error: {e}")
 
 # VOICEVOXで喋る
 def speak(text):

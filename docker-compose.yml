@@ -49,7 +49,8 @@ services:
       - DISPLAY=${DISPLAY}
     # 起動時に必要なライブラリをインストールして実行
     command: >
-      sh -c "apt-get update && apt-get install -y alsa-utils x11-xserver-utils && 
+      sh -c "apt-get update && 
+             apt-get install -y alsa-utils x11-xserver-utils xscreensaver && 
              pip install requests influxdb-client ollama && 
              python main.py"
     restart: unless-stopped

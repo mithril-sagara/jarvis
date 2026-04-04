@@ -7,6 +7,8 @@ import numpy as np
 import openwakeword
 from openwakeword.model import Model
 from influxdb_client import InfluxDBClient
+import io
+import wave
 
 # --- 1. 環境変数の読み込み ---
 URL = os.getenv("INFLUXDB_URL")
@@ -77,16 +79,33 @@ def get_current_solar():
 def listen_and_stt():
     print("🎤 Listening...")
     frames = []
-    for _ in range(0, int(RATE / CHUNK * 3)):
+    # 4秒間サンプリング（少し余裕を持たせる）
+    for _ in range(0, int(RATE / CHUNK * 4)):
         data = mic_stream.read(CHUNK, exception_on_overflow=False)
         frames.append(data)
     
-    audio_data = b''.join(frames)
+    # WAV形式をメモリ上で作成
+    buffer = io.BytesIO()
+    with wave.open(buffer, 'wb') as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(audio_py.get_sample_size(pyaudio.paInt16))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+    
+    audio_wav = buffer.getvalue()
+
     try:
-        files = {'audio_file': ('speech.wav', audio_data, 'audio/wav')}
-        res = requests.post(STT_URL, files=files, timeout=10)
-        text = res.json().get("text", "")
-        return text
+        files = {'audio_file': ('speech.wav', audio_wav, 'audio/wav')}
+        res = requests.post(STT_URL, files=files, timeout=15)
+        # APIのレスポンス形式に合わせてパース
+        result = res.json()
+        text = ""
+        if "text" in result:
+            text = result["text"]
+        elif "results" in result and len(result["results"]) > 0:
+            text = result["results"][0]["text"]
+            
+        return text.strip()
     except Exception as e:
         print(f"STT Error: {e}")
         return ""
@@ -112,6 +131,7 @@ def ask_jarvis(user_text):
 
 # --- 7. 口 (TTS) ---
 def speak(text):
+    if not text: return
     try:
         q_res = requests.post(f"{TTS_URL}/audio_query?text={text}&speaker={SPEAKER_ID}", timeout=10)
         a_res = requests.post(f"{TTS_URL}/synthesis?speaker={SPEAKER_ID}", data=q_res.content, timeout=20)
@@ -130,19 +150,16 @@ def jarvis_cycle():
             data = mic_stream.read(CHUNK, exception_on_overflow=False)
             audio_frame = np.frombuffer(data, dtype=np.int16)
             
-            # --- 【重要：次元不一致の解決】 ---
             # 1. 浮動小数点数(float32)に正規化
             audio_frame_ready = audio_frame.astype(np.float32) / 32768.0
             
             # 2. モデルが期待する 3次元 [1, 1, 1280] に形状を変更
-            # エラーメッセージ (3 != 2) に基づき、次元を1つ増やします
             audio_frame_3d = audio_frame_ready.reshape(1, 1, -1)
             
             # ウェイクワード推論実行
             try:
                 prediction = oww_model.predict(audio_frame_3d)
             except Exception:
-                # 保険：もし3次元で失敗した場合は2次元 [1, 1280] で再試行
                 prediction = oww_model.predict(audio_frame_ready.reshape(1, -1))
             
             detected = False
@@ -155,7 +172,7 @@ def jarvis_cycle():
             if detected:
                 control_screen("wake")
                 user_command = listen_and_stt()
-                if user_command.strip():
+                if user_command:
                     print(f"👤 You: {user_command}")
                     answer = ask_jarvis(user_command)
                     print(f"🤖 Jarvis: {answer}")

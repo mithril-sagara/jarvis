@@ -18,7 +18,6 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
 STT_URL = os.getenv("STT_URL")
 TTS_URL = os.getenv("TTS_URL")
 SPEAKER_ID = os.getenv("SPEAKER_ID", "13") 
-# 環境変数から取得するように変更（柔軟性のため）
 MODEL_PATH = os.getenv("JARVIS_MODEL_PATH", "/app/models/jarvis.tflite")
 
 # --- 2. 各種設定と初期化 ---
@@ -26,26 +25,21 @@ CHANNELS = 1
 RATE = 16000
 CHUNK = 1280 
 
-# InfluxDBクライアント初期化
 client = InfluxDBClient(url=URL, token=TOKEN, org=ORG)
 
 print(f"--- Jarvis System Booting ---")
 
-# モデルファイルの存在チェック
 if not os.path.exists(MODEL_PATH):
     print(f"❌ FATAL ERROR: Model file not found at {MODEL_PATH}")
-    # 保険：ライブラリ内の標準モデルを使用
     oww_model = Model(wakeword_models=["alexa"], inference_framework="tflite")
     print("⚠️ Warning: Falling back to 'alexa' model.")
 else:
     print(f"✅ Found model: {MODEL_PATH}")
-    # 推論フレームワークを明示して初期化
     oww_model = Model(
         wakeword_models=[MODEL_PATH], 
         inference_framework="tflite"
     )
 
-# マイクストリーム開始
 try:
     audio_py = pyaudio.PyAudio()
     mic_stream = audio_py.open(format=pyaudio.paInt16, channels=CHANNELS, rate=RATE,
@@ -83,14 +77,12 @@ def get_current_solar():
 def listen_and_stt():
     print("🎤 Listening...")
     frames = []
-    # 3秒間サンプリング
     for _ in range(0, int(RATE / CHUNK * 3)):
         data = mic_stream.read(CHUNK, exception_on_overflow=False)
         frames.append(data)
     
     audio_data = b''.join(frames)
     try:
-        # wav形式として送信（faster-whisper-serverが期待する形式）
         files = {'audio_file': ('speech.wav', audio_data, 'audio/wav')}
         res = requests.post(STT_URL, files=files, timeout=10)
         text = res.json().get("text", "")
@@ -136,17 +128,22 @@ def jarvis_cycle():
     while True:
         try:
             data = mic_stream.read(CHUNK, exception_on_overflow=False)
-            # numpy配列に変換 (int16)
             audio_frame = np.frombuffer(data, dtype=np.int16)
             
-            # --- 【重要修正】 ---
-            # openWakeWordのpredictに渡す際、明示的に2次元 [1, 1280] にし、
-            # かつ float32 にキャストすることで strict=True のエラーを回避します
-            # ※多くのTFLiteモデルは内部的にfloat32の2次元入力を期待します
+            # --- 【重要：次元不一致の解決】 ---
+            # 1. 浮動小数点数(float32)に正規化
             audio_frame_ready = audio_frame.astype(np.float32) / 32768.0
             
+            # 2. モデルが期待する 3次元 [1, 1, 1280] に形状を変更
+            # エラーメッセージ (3 != 2) に基づき、次元を1つ増やします
+            audio_frame_3d = audio_frame_ready.reshape(1, 1, -1)
+            
             # ウェイクワード推論実行
-            prediction = oww_model.predict(audio_frame_ready)
+            try:
+                prediction = oww_model.predict(audio_frame_3d)
+            except Exception:
+                # 保険：もし3次元で失敗した場合は2次元 [1, 1280] で再試行
+                prediction = oww_model.predict(audio_frame_ready.reshape(1, -1))
             
             detected = False
             for mdl in prediction:

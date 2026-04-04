@@ -26,17 +26,23 @@ services:
       context: .
       dockerfile_inline: |
         FROM python:3.11-slim
-        # ビルドに必要な最小限のパッケージのみ（wgetは不要）
+        # 1. OSパッケージのインストール（ビルドに必要なツールを網羅）
         RUN apt-get update && apt-get install -y \
             alsa-utils x11-xserver-utils xscreensaver portaudio19-dev \
-            gcc python3-dev libatomic1 ca-certificates && \
+            gcc python3-dev libatomic1 ca-certificates build-essential && \
             rm -rf /var/lib/apt/lists/*
         
         WORKDIR /app
         
-        # ライブラリのインストール
-        RUN pip install --no-cache-dir --upgrade pip
-        RUN pip install --no-cache-dir requests influxdb-client ollama openwakeword pyaudio numpy
+        # 2. pip自体の基盤を固める（これが無いとC言語系のビルドで落ちる）
+        RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+        
+        # 3. 依存ライブラリのインストール
+        # ※NumPyは2.x系だとopenwakewordが動かないため、1.26.xに固定
+        RUN pip install --no-cache-dir "numpy<2"
+        RUN pip install --no-cache-dir requests influxdb-client ollama
+        RUN pip install --no-cache-dir pyaudio
+        RUN pip install --no-cache-dir openwakeword
         
         COPY . .
         CMD ["python", "main.py"]
@@ -49,7 +55,7 @@ services:
       - "/dev/snd:/dev/snd"
     volumes:
       - .:/app
-      - ./models:/app/models  # ★ホストで落としたモデルをここに流し込む
+      - ./models:/app/models
       - /tmp/.X11-unix:/tmp/.X11-unix
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}

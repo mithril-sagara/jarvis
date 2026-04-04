@@ -57,6 +57,7 @@ services:
       - .:/app
       - ./models:/app/models
       - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./models:/usr/local/lib/python3.11/site-packages/openwakeword/resources/models
       # ★ホストのフォントディレクトリを共有
       - /usr/share/fonts:/usr/share/fonts:ro
     environment:

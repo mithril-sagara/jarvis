@@ -9,11 +9,14 @@ services:
     restart: always
 
   stt:
-    image: fedirz/faster-whisper-server:latest-cpu
+    # ARM64(Pi 5)に完全対応し、HTTP APIを提供するイメージに変更
+    image: onerahmet/openai-whisper-asr-webservice:latest
     container_name: jarvis-stt
     environment:
-      - WHISPER_MODEL=tiny
-      - WHISPER_LANGUAGE=ja
+      - ASR_MODEL=tiny
+      - ASR_LANGUAGE=ja
+    ports:
+      - "9000:9000"
     restart: unless-stopped
 
   tts:
@@ -58,7 +61,6 @@ services:
       - ./models:/app/models
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./models:/usr/local/lib/python3.11/site-packages/openwakeword/resources/models
-      # ★ホストのフォントディレクトリを共有
       - /usr/share/fonts:/usr/share/fonts:ro
     environment:
       - INFLUXDB_URL=${INFLUXDB_URL}
@@ -66,12 +68,12 @@ services:
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - OLLAMA_HOST=ollama:11434
-      - STT_URL=http://stt:10300/transcribe
+      # ★STTのURLを新しいコンテナのAPIエンドポイントに変更
+      - STT_URL=http://stt:9000/asr?task=transcribe&language=ja&output=json
       - TTS_URL=http://tts:50021
       - SPEAKER_ID=13
       - OLLAMA_MODEL=llama3.2:1b
       - DISPLAY=:0
       - JARVIS_MODEL_PATH=/app/models/jarvis.tflite
-      # ★日本語ロケールの設定
       - LANG=ja_JP.UTF-8
     restart: unless-stopped
